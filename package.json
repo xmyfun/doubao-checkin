@@ -1,0 +1,45 @@
+{
+  "name": "doubao-checkin",
+  "version": "0.1.0",
+  "private": true,
+  "description": "豆包 PC 端「天天领额度」每日自动签到（macOS，通过 CDP 驱动已登录客户端）",
+  "author": {
+    "name": "XMyFun",
+    "url": "https://github.com/xmyfun"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xmyfun/doubao-checkin.git"
+  },
+  "bugs": {
+    "url": "https://github.com/xmyfun/doubao-checkin/issues"
+  },
+  "homepage": "https://github.com/xmyfun/doubao-checkin#readme",
+  "keywords": [
+    "doubao",
+    "checkin",
+    "macos",
+    "launchd",
+    "cdp",
+    "automation"
+  ],
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "doubao-checkin": "bin/checkin.mjs"
+  },
+  "scripts": {
+    "checkin": "node bin/checkin.mjs",
+    "dry": "node bin/checkin.mjs --dry-run",
+    "doctor": "node bin/checkin.mjs --doctor",
+    "log": "node bin/checkin.mjs --log",
+    "test": "node --test",
+    "test:cov": "node --test --experimental-test-coverage --test-coverage-include='src/**/*.mjs' --test-coverage-include='bin/**/*.mjs'",
+    "install-task": "./scripts/install-launchd.sh",
+    "uninstall-task": "./scripts/install-launchd.sh --uninstall",
+    "install-node": "./scripts/install-node.sh"
+  },
+  "license": "MIT"
+}

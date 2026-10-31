@@ -1,0 +1,16 @@
+# 跨编辑器统一基础格式。本项目混用 .mjs 与 .sh，约定如下。
+# 仅约束「基础格式」，不约束风格细节（命名、引号等由人把控）。
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+[*.sh]
+# shell 脚本同样用 2 空格（与项目现有风格一致），不用 tab
+indent_style = space
+indent_size = 2

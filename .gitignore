@@ -1,0 +1,28 @@
+# local configuration
+config.conf
+
+# runtime
+logs/
+.lock/
+.notify-state.json
+
+# repair 的缓存备份（每次 5~7MB，可随时删）
+backup/
+
+# 本地 AI 助手 / 编辑器的状态目录（本机产物，不是项目内容）
+.workbuddy/
+.codex/
+.claude/
+
+# Development（不随仓库发布）
+#   test/ 是**要发布**的：使用者提 PR 前用它自测，所以这里不列
+#   AGENTS.md 是给 AI / 接手者的内部交接文档（含本机绝对路径、docs/dev 地图），也不发布
+docs/
+dev/
+/AGENTS.md
+
+# node runtime
+vendor/
+node_modules/
+
+.DS_Store
