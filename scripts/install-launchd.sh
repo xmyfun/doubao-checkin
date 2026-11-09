@@ -8,8 +8,13 @@
 #   ./scripts/install-launchd.sh --allow-relaunch no
 #   ./scripts/install-launchd.sh --allow-relaunch        # 不带值 = yes
 #   ./scripts/install-launchd.sh --dry-run             # 只打印将生成的 plist，不注册、不询问、不改配置
+#   ./scripts/install-launchd.sh --test-webhook=<地址>  # 装完用这个地址发一条 webhook 测试消息（非交互传值）
 #   ./scripts/install-launchd.sh --status              # 查看状态
 #   ./scripts/install-launchd.sh --uninstall           # 卸载
+#
+# 交互式安装（终端里直接跑）若发现 config.conf 没填 notify.feishuWebhook，
+# 会再问一次飞书群机器人地址：贴入即写进 config.conf，直接回车跳过。
+# --dry-run 和 --test-webhook=<地址> 都不问。
 #
 # 两件必须知道的事：
 #
@@ -177,6 +182,18 @@ fi
 #   --allow-relaunch=yes|no    不询问，直接把这个值写进 config.conf 的 allowRelaunch
 #   --allow-relaunch yes|no    同上，空格写法
 #   --allow-relaunch           不带值 = yes
+#   --test-webhook=<地址>      装完自检：**用这个地址**发一条测试消息，只用于这一条，
+#                              不改 config.conf；空格写法 --test-webhook <地址> 也认
+#   --test-webhook <地址>      同上
+#
+# 关于 --test-webhook 的值：它是给非交互安装用的 —— 自动化脚本不必先编辑
+# config.conf，把地址直接写在命令行就能验通道。不带这个参数时，向导仍按
+# config.conf 的 notify.feishuWebhook 自动发；两边都没配就静默跳过。
+# ⚠ 定时任务本身永远只从 config.conf 读地址，参数里的地址不会被写进去。
+#
+# 交互式安装且 config.conf 没填地址时，会在 bootstrap 之前多问一句：贴入地址
+# 就写进 config.conf（并用于本次自检），直接回车跳过。这样不必先手工编辑配置
+# 文件也能把长期通知配好；已配置过的用户不会被反复打扰。
 #
 # 关于 --allow-relaunch 的语义（容易误会，写清楚）：
 #   · 它**只改 config.conf，绝不写进 plist** —— 写进 plist 会永久盖住配置文件，
@@ -188,6 +205,7 @@ DRY=0
 RUN_NOW=0
 RELAUNCH_ARG=""      # 空 = 没指定 → 需要询问
 RELAUNCH_ARG_SRC=""  # 记录用户是怎么给的，只用于输出
+WEBHOOK_URL_ARG=""   # --test-webhook 的值；空 = 自检时按 config.conf 自动取地址
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run)  DRY=1; shift ;;
@@ -212,6 +230,26 @@ while [ $# -gt 0 ]; do
           RELAUNCH_ARG="$1"; RELAUNCH_ARG_SRC="--allow-relaunch $1"; shift ;;
       esac
       ;;
+    --test-webhook=*)
+      WEBHOOK_URL_ARG="${1#*=}"
+      # 和 --allow-relaunch= 一致：空值直接报错，不静默退化成「去读 config.conf」
+      if [ -z "$WEBHOOK_URL_ARG" ]; then
+        red "--test-webhook= 后面要跟一个完整的 webhook 地址"
+        exit 1
+      fi
+      shift
+      ;;
+    --test-webhook)
+      # 空格写法。值必须是一个地址，不猜、不把下一个参数误当成值
+      shift
+      if [ $# -eq 0 ] || [[ "${1:-}" == --* ]]; then
+        red "--test-webhook 后面要跟一个完整的 webhook 地址"
+        red "  例：--test-webhook=https://open.feishu.cn/open-apis/bot/v2/hook/xxx"
+        exit 1
+      fi
+      WEBHOOK_URL_ARG="$1"
+      shift
+      ;;
     --uninstall)
       launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
       rm -f "$PLIST"
@@ -228,7 +266,7 @@ while [ $# -gt 0 ]; do
       ;;
     *)
       red "未知参数：$1"
-      echo "  可用：--dry-run  --run-now  --allow-relaunch=yes|no  --uninstall  --status"
+      echo "  可用：--dry-run  --run-now  --allow-relaunch=yes|no  --test-webhook=<地址>  --uninstall  --status"
       exit 1
       ;;
   esac
@@ -377,6 +415,66 @@ if [ -n "$APPLY" ] && [ "${DRY:-0}" != "1" ]; then
     red "✗ 没能改 config.conf，安装继续，本次仍按 allowRelaunch = ${RELAUNCH} 运行"
   fi
 fi
+echo
+
+# ── 飞书 webhook：交互式安装顺带把地址配好 ──
+#
+# 只在「config.conf 没填地址 + 没给 --test-webhook + 不是 --dry-run + 读得到 stdin」
+# 时问一次。已配好的用户不该被反复打扰；非交互安装（管道、< /dev/null、自动化）
+# 更不能卡在等待输入上 —— read 读不到就跳过，和上面 allowRelaunch 同一套规矩。
+#
+# 写回必须用 conf_set：它只替换 `key = ...` 那一行，保留行尾注释和其余配置。
+# 为什么不像 --test-webhook 那样只发一条消息了事：定时任务永远从 config.conf 读
+# 地址，参数里的值不会进 plist；不写进去就是「这次测得通、以后一条都收不到」。
+#
+# 这一段被 test/install-launchd.test.mjs 按函数名抽取执行，函数体内不要写
+# 依赖后面才定义的变量。
+prompt_webhook() {
+  if [ "${DRY:-0}" = "1" ]; then return 0; fi
+  if [ -n "${WEBHOOK_URL_ARG:-}" ]; then return 0; fi
+  if [ -n "$(conf_get notify.feishuWebhook)" ]; then return 0; fi
+
+  echo "飞书群通知（可选）：签到成功、熔断停工会推到群机器人。"
+  echo "config.conf 里还没填 notify.feishuWebhook，现在可以直接配置。"
+  echo "贴入群机器人地址即写入 config.conf；直接回车跳过（以后也能在 config.conf 里补）。"
+  while :; do
+    printf 'webhook 地址（回车跳过）：'
+    WEBHOOK_IN=""
+    if ! read -r WEBHOOK_IN; then
+      echo
+      yellow "（读不到输入，跳过飞书通知配置；非交互安装可用 --test-webhook=<地址>）"
+      return 0
+    fi
+    # 复制粘贴常带首尾空白，顺手去掉（含 \r）。地址内部不许再有空白、引号、
+    # 反斜杠或 #：conf_set 走 awk -v，反斜杠会被当转义序列；conf_get 会把 #
+    # 之后当注释截掉。这两种情况都会让写进去的地址和用户输入的不一样。
+    WEBHOOK_IN="$(printf '%s' "$WEBHOOK_IN" | /usr/bin/awk '{ gsub(/^[[:space:]]+|[[:space:]]+$/, ""); print }')"
+    if [ -z "$WEBHOOK_IN" ]; then
+      echo "已跳过飞书通知配置。"
+      return 0
+    fi
+    case "$WEBHOOK_IN" in
+      http://*|https://*) ;;
+      *) red "地址要以 http:// 或 https:// 开头（收到：${WEBHOOK_IN}）"; continue ;;
+    esac
+    case "$WEBHOOK_IN" in
+      *[[:space:]]*|*'"'*|*"'"*|*'\'*|*'#'*)
+        red "地址里不能含空格、引号、反斜杠或 #，请重新粘贴"
+        continue ;;
+    esac
+    if [ "${#WEBHOOK_IN}" -gt 2048 ]; then
+      red "地址太长了（${#WEBHOOK_IN} 字符），请检查是否粘错"
+      continue
+    fi
+    if conf_set notify.feishuWebhook "$WEBHOOK_IN"; then
+      green "✓ 已写入 config.conf 的 notify.feishuWebhook（装完会发一条测试消息，请到群里查看）"
+    else
+      red "✗ 没能写入 config.conf，安装继续；可稍后手动填写 notify.feishuWebhook"
+    fi
+    return 0
+  done
+}
+prompt_webhook
 echo
 
 # ── 定时时间：从 config.conf 的 schedule.* 读 ──
@@ -543,6 +641,39 @@ fi
 echo "  日志  ${PROJECT_DIR}/scripts/doubao-checkin.sh --log    （签到约 30~60 秒，稍等再看）"
 echo "  卸载  ${PROJECT_DIR}/scripts/install-launchd.sh --uninstall"
 echo
+
+# ── 飞书 webhook 自检：装完了才说「安装完成」 ──
+#
+# 为什么放在 bootstrap 之后：消息第一行就是「定时任务安装完成」，加载之前发是
+# 谎报；而且自检失败只警告、不阻断安装，放后面没有代价。bootstrap 若失败，
+# set -e 会先退出，也就根本不会发出这条消息。
+#
+# 为什么不调 scripts/doubao-checkin.sh --test-webhook：那个开关附着在**一次真实
+# 签到**上（会拉起/重启客户端、内容取决于页面状态）；自检只验通知通道，不该把
+# 豆包状态卷进来。向导确实会因 RunAtLoad 顺带跑一次签到，但那是 bootstrap 之后
+# 的 --quiet 定时任务，按过滤规则推送，不是一条内容固定的自检消息。
+#
+# 消息内容：安装完成 + 主机名 + 签到脚本绝对路径（即 plist 里实际执行的那个）。
+# 地址来源有三处，优先级同下：--test-webhook=<地址> > 交互询问刚写进的 config.conf
+# > config.conf 里早就填好的。三者都没配 → webhook-test.mjs 输出 SKIP，静默略过。
+WEBHOOK_SELFTEST_ARGS=(--script="$RUN_SH")
+if [ -n "$WEBHOOK_URL_ARG" ]; then
+  WEBHOOK_SELFTEST_ARGS=(--url="$WEBHOOK_URL_ARG" --script="$RUN_SH")
+fi
+WEBHOOK_TEST="$("$NODE_BIN" "$PROJECT_DIR/bin/webhook-test.mjs" "${WEBHOOK_SELFTEST_ARGS[@]}" 2>&1)" && WEBHOOK_RC=0 || WEBHOOK_RC=$?
+case "$WEBHOOK_TEST" in
+  OK*)  green "✓ 已推送测试消息到飞书群，请到群里查看" ;;
+  SKIP) : ;;
+  *)    yellow "⚠ webhook 自检未通过：${WEBHOOK_TEST#ERR }"
+        yellow "  安装继续；可重跑 ./scripts/install-launchd.sh --test-webhook=<地址> 单独复验" ;;
+esac
+if [ -n "$WEBHOOK_URL_ARG" ] && [ -z "$(conf_get notify.feishuWebhook)" ]; then
+  yellow "  注意  参数里的地址只用于这条测试消息；定时任务仍从 config.conf 读，"
+  yellow "        请把地址填进 notify.feishuWebhook，或重跑不带参数的交互安装按提示填写，"
+  yellow "        否则定时任务不会推送。"
+fi
+if [ "$WEBHOOK_TEST" != "SKIP" ]; then echo; fi
+
 if [ "${RUN_NOW}" = "1" ]; then
   # -k 会先杀掉正在跑的实例再启动；这里不用 -k，正常排队即可
   launchctl kickstart "gui/$(id -u)/${LABEL}"

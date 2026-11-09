@@ -39,6 +39,7 @@ export const HELP = `${APP_TITLE}
   --json               机器可读输出
   --quiet              只在出错时输出
   --no-notify          失败时不弹窗
+  --test-webhook       强制往飞书群推一条本次结果（验证配置用，不受过滤限制）
   --create-config      用内置模板生成一份 config.conf（已存在则不动）
   --version            显示版本号
   --help, -h           显示这份说明
@@ -55,7 +56,7 @@ node（由 scripts/doubao-checkin.sh 处理，不需要 node 就能跑）
   ./scripts/install-launchd.sh --uninstall  卸载
 
 行为配置在 config.conf（首次运行会自动用内置模板生成一份，不依赖磁盘上的
-config.conf.template）；命令行参数优先级更高。
+config.conf.example）；命令行参数优先级更高。
 
 例外：schedule.* 那几项（运行时刻 / 登录补跑 / 兜底间隔）写进 launchd 的 plist，
 改完要重跑一次 ./scripts/install-launchd.sh 才生效。`;

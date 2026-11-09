@@ -2,7 +2,7 @@
  * 配置：内嵌模板（唯一事实来源）+ 解析 + 生成 config.conf
  *
  * **术语约定**：这份文件里说的「模板」一律指 `src/config-template.mjs` 导出的
- * 常量 `CONFIG_TEMPLATE`，**不是**仓库根目录那个 `config.conf.template`。后者只是
+ * 常量 `CONFIG_TEMPLATE`，**不是**仓库根目录那个 `config.conf.example`。后者只是
  * 同一份内容的可读副本（给用户复制改名的），可能被改名、也可能被删掉 —— 运行期
  * 没有任何代码读它。
  *
@@ -25,7 +25,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 export const CONFIG_PATH = join(ROOT, 'config.conf');
 /** 仓库里那份可读的模板副本。**只给测试用**（校验磁盘副本与内嵌常量一致），
  *  运行期任何代码都不读它 —— 它随时可能被改名/删除。 */
-export const CONFIG_TEMPLATE_PATH = join(ROOT, 'config.conf.template');
+export const CONFIG_TEMPLATE_PATH = join(ROOT, 'config.conf.example');
 
 // ── 解析 ──
 
@@ -95,6 +95,9 @@ export const SCHEMA = [
 
   // 0 = 不去抖（每次失败都弹）
   { key: 'notify.debounceHours', kind: 'number', min: 0, max: 8760 },
+
+  // 空 = 不启用。真实地址只写进 config.conf，绝不进仓库
+  { key: 'notify.feishuWebhook', kind: 'text' },
 ];
 
 /** { 'busyCheck.enabled': item, ... } */

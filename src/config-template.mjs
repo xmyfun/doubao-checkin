@@ -1,18 +1,18 @@
 /**
  * config.conf 的模板文本 —— **注释与默认值的唯一来源**。
  *
- * 为什么把它整段嵌进代码，而不是运行时去读 config.conf.template：
+ * 为什么把它整段嵌进代码，而不是运行时去读 config.conf.example：
  *   用户会按 README 把模板改名成 config.conf（改名后这个文件就没了），
  *   而 --create-config / 首次运行仍然要能生成一份带完整注释的配置。
- *   所以模板必须以常量形式存在于程序内，磁盘上的 config.conf.template 只是
+ *   所以模板必须以常量形式存在于程序内，磁盘上的 config.conf.example 只是
  *   同一份内容的副本，供用户直接复制改名。
  *
  * 同步关系（有单测锁住）：
- *   · config.conf.template 与这里的 CONFIG_TEMPLATE 必须逐字节一致
+ *   · config.conf.example 与这里的 CONFIG_TEMPLATE 必须逐字节一致
  *   · 默认值由这段文本解析得出（src/settings.mjs 的 DEFAULTS），
  *     不在 schema 里另写一遍 —— 否则注释里的「默认值：X」和真默认值迟早对不上
  *
- * 改配置项时：先改 config.conf.template，再把这段常量整体替换成同样的内容。
+ * 改配置项时：先改 config.conf.example，再把这段常量整体替换成同样的内容。
  */
 
 export const CONFIG_TEMPLATE = `# ════════════════════════════════════════════════════════════════════════════
@@ -199,4 +199,22 @@ breaker.cooldownHours = 12
 #  0 = 不去抖，每次失败都弹。
 #  ⚠️ 建议保持默认：设 0 意味着一晚上可能弹十几次。
 notify.debounceHours = 6
+
+# ────────────────────────────────────────────────────────────────────────────
+#  飞书群机器人（可选）
+# ────────────────────────────────────────────────────────────────────────────
+
+#  自定义机器人的 webhook 地址。留空 = 不启用，不推任何消息。
+#
+#  注意：真实地址只写进 config.conf（已被 .gitignore 排除），不要提交到仓库、
+#  也不要贴进 issue 或日志。拿到这个地址的人就能往群里发消息。
+#
+#  推送规则（只在定时任务 --quiet 下生效，手动运行不推送）：
+#    · 签到成功（SUCCESS）——每次都推
+#    · breaker.threshold 不为 0 ——当天第一条「熔断停工（CIRCUIT）」推一次，失败不推
+#    · breaker.threshold = 0   ——没有熔断，改推当天第一条失败
+#    · 已签到 / 遇忙跳过 / 只看不签 / 诊断 ——不推
+#  想立刻验证配置通不通：跑 ./scripts/doubao-checkin.sh --test-webhook
+#  （任意结果都强推一条），或重跑安装向导，检测到地址会自动发一条测试消息。
+notify.feishuWebhook =
 `;

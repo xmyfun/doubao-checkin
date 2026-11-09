@@ -76,7 +76,7 @@ cd doubao-checkin
 
 ### 第 1 步：手动签一次，确认这台机器能跑通
 
-如果想自己调端口、日志位置、是否允许重启豆包、忙闲阈值，就把 `config.conf.template` 改名成 `config.conf` 再编辑。不改也行——**首次运行会自动生成一份**默认配置，绝大多数人都够用。
+如果想自己调端口、日志位置、是否允许重启豆包、忙闲阈值，就把 `config.conf.example` 改名成 `config.conf` 再编辑。不改也行——**首次运行会自动生成一份**默认配置，绝大多数人都够用。
 
 先用 --dry-run 模式进行测试，或者直接运行脚本尝试签到：
 
@@ -216,10 +216,42 @@ cd doubao-checkin
 | `breaker.threshold` | `3` | 连续失败几次后暂停自动重试，`0` = 不熔断 |
 | `breaker.cooldownHours` | `12` | 熔断后隔多久放行一次试探 |
 | `notify.debounceHours` | `6` | 同一类提醒多少小时内只弹一次，`0` = 每次都弹 |
+| `notify.feishuWebhook` | 空 | 飞书群机器人 webhook 地址，空 = 不推送（详见下节） |
 
 写错了不会崩：文件不存在、只写一半、某项填错，都只是"那一项用默认值 + 打一条警告"，整个删掉也能工作。
 
 **唯一的例外是 `schedule.*`**：它们由安装脚本读取并写进 plist，格式写错（比如 `25:00`、`7:5`）会让安装脚本直接中止——宁可装不上，也不要装上一个错的时间。
+
+---
+
+## 飞书群通知（可选）
+
+把 `config.conf` 里的 `notify.feishuWebhook` 填成群机器人的 webhook 地址即可启用；留空（默认）一条都不发。
+
+**也可以在安装向导里填**：交互式跑 `./scripts/install-launchd.sh` 时，如果发现这项为空，会直接问你要地址——贴入即写入 `config.conf` 并用于这次安装的自检消息，按回车跳过。已经填过地址就不会再问。
+
+地址只写进 `config.conf`（已被 `.gitignore` 排除），**不要提交进仓库**——拿到地址的人就能往群里发消息。
+
+只推「值得看的」，不刷屏：
+
+| 运行方式 | 推送 |
+|---|---|
+| 定时任务 · 签到成功 | 每次都推 |
+| 定时任务 · `breaker.threshold ≠ 0`（默认） | 当天第一条「熔断停工」推一次；单条失败、已签到、遇忙跳过都不推 |
+| 定时任务 · `breaker.threshold = 0` | 没有熔断可报，改推当天第一条失败 |
+| 手动运行 | 不推（结果已经在终端里了） |
+| 加 `--test-webhook` | 强制推一条本次结果，不受上面任何过滤限制 |
+
+推送失败（超时、地址无效、业务码非 0）只在终端留一行提示，**不改签到结果和退出码**，也不占掉「当天首个」名额，下一次运行会自动重试。
+
+配置完想立刻验证，两条路：
+
+- `./scripts/doubao-checkin.sh --test-webhook`：会真的跑一趟签到，把**本次结果**强制推一条。
+- 重跑 `./scripts/install-launchd.sh`：装完自动发一条内容固定的自检消息（安装完成、主机名、签到脚本绝对路径），并提示「已推送测试消息到飞书群，请到群里查看」。刚才在向导里填的地址会直接用于这条自检；没配地址或选择跳过就静默略过，发送失败只警告、不中断安装。
+
+非交互 / 自动化安装可以把地址直接写在命令行：`./scripts/install-launchd.sh --test-webhook=https://open.feishu.cn/open-apis/bot/v2/hook/xxx`，这种情况不会再交互询问。**这个值只用于那条测试消息**，不会写进 `config.conf`；定时任务仍只从 `config.conf` 读地址，所以正式启用还是要填 `notify.feishuWebhook`，或重跑一次不带参数的交互安装按提示填写。
+
+发送结果会解析响应体里的业务码，不会只凭 HTTP 200 就当作成功。
 
 ---
 
@@ -236,12 +268,14 @@ cd doubao-checkin
 | `./scripts/doubao-checkin.sh --which-node` | 用和定时任务完全相同的逻辑找 node |
 | `./scripts/doubao-checkin.sh --find-node` | 列出查找顺序和实际会用的那个（想固定用某一份时看它） |
 | `./scripts/doubao-checkin.sh --create-config` | 生成一份默认的 `config.conf`（已存在则不动） |
+| `./scripts/doubao-checkin.sh --test-webhook` | 强制往飞书群推一条本次结果（验证 webhook 配置） |
 | `./scripts/doubao-checkin.sh --help` | 全部参数和说明 |
-| `./scripts/install-launchd.sh` | 安装 / 重装定时任务 |
+| `./scripts/install-launchd.sh` | 安装 / 重装定时任务；未配飞书 webhook 时交互询问地址（回车跳过） |
+| `./scripts/install-launchd.sh --test-webhook=<地址>` | 装完用这个地址往飞书群发一条测试消息（不改 `config.conf`，适合非交互安装） |
 | `./scripts/install-launchd.sh --status` | 看当前状态 |
 | `./scripts/install-launchd.sh --uninstall` | 卸载 |
 
-安装脚本还有 `--allow-relaunch=yes|no`（跳过那次询问，直接把值写进 `config.conf`）、`--run-now`、`--dry-run`（只打印 plist，不注册）等参数，`--help` 里有完整说明。
+安装脚本还有 `--allow-relaunch=yes|no`（跳过那次询问，直接把值写进 `config.conf`）、`--run-now`、`--dry-run`（只打印 plist，不注册）等参数，完整列表在 `scripts/install-launchd.sh` 文件头的用法注释里。
 
 ---
 

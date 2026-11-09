@@ -1,6 +1,6 @@
 {
   "name": "doubao-checkin",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "豆包 PC 端「天天领额度」每日自动签到（macOS，通过 CDP 驱动已登录客户端）",
   "author": {

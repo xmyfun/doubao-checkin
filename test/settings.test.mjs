@@ -4,7 +4,7 @@
  * 这层为什么要测：`config.conf` 的注释是用户理解配置的唯一途径，而默认值写错
  * （或注释里写着 2、代码里是 1）不会报错、只会"行为跟说明不一致"，
  * 这种错最难被发现。所以把三件事锁住：
- *   · 磁盘上的 config.conf.template 与 src/config-template.mjs 的常量一致
+ *   · 磁盘上的 config.conf.example 与 src/config-template.mjs 的常量一致
  *   · DEFAULTS 就是模板解析出来的值（不是另写的一份）
  *   · renderConf 只替换值，注释一个字都不动
  */
@@ -20,15 +20,15 @@ import {
 } from '../src/settings.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const TEMPLATE_PATH = join(ROOT, 'config.conf.template');
+const TEMPLATE_PATH = join(ROOT, 'config.conf.example');
 
 /** 忽略行尾空白（编辑器会 trim，不该因此判失败） */
 const norm = (s) => s.split('\n').map((l) => l.replace(/[ \t]+$/, '')).join('\n');
 
-test('磁盘上的 config.conf.template 与代码里的 CONFIG_TEMPLATE 一致', (t) => {
+test('磁盘上的 config.conf.example 与代码里的 CONFIG_TEMPLATE 一致', (t) => {
   if (!existsSync(TEMPLATE_PATH)) {
     // 用户按 README 把它改名成 config.conf 了，属于正常情况
-    t.skip('config.conf.template 已被改名，跳过');
+    t.skip('config.conf.example 已被改名，跳过');
     return;
   }
   assert.equal(norm(readFileSync(TEMPLATE_PATH, 'utf8')), norm(CONFIG_TEMPLATE),
@@ -38,7 +38,7 @@ test('磁盘上的 config.conf.template 与代码里的 CONFIG_TEMPLATE 一致',
 test('模板里每一项都在 schema 里，schema 每一项也都在模板里', () => {
   const keys = Object.keys(parseConf(CONFIG_TEMPLATE).values);
   assert.deepEqual([...keys].sort(), [...ITEMS.keys()].sort(),
-    'config.conf.template 与 src/settings.mjs 的 SCHEMA 必须一一对应');
+    'config.conf.example 与 src/settings.mjs 的 SCHEMA 必须一一对应');
 });
 
 test('默认值就是模板里写的值', () => {
@@ -47,6 +47,7 @@ test('默认值就是模板里写的值', () => {
   assert.equal(DEFAULTS.cdpPort, 9225);
   assert.equal(DEFAULTS.nodePath, '');
   assert.equal(DEFAULTS.logDir, '');
+  assert.equal(DEFAULTS.notify.feishuWebhook, '', 'webhook 默认留空 = 不启用');
   assert.equal(DEFAULTS.allowRelaunch, true);
   assert.deepEqual(DEFAULTS.busyCheck, {
     enabled: true, windowSeconds: 30, sampleSeconds: 3, cpuThreshold: 0.35, netInKBps: 3,
@@ -119,14 +120,14 @@ test('createConf：已存在就绝不覆盖用户改过的值', (t) => {
   assert.equal(readFileSync(path, 'utf8'), 'cdpPort = 9300\n');
 });
 
-// --create-config 不能依赖磁盘上的 config.conf.template：那个文件随时可能不在
+// --create-config 不能依赖磁盘上的 config.conf.example：那个文件随时可能不在
 // （用户按 README 改名成 config.conf 了，或作者删了）。生成必须只靠代码里的常量。
 // 这里把 src/ 整个搬到临时目录当作一个"模板文件缺失的项目"，再走一遍生成。
-test('createConf：磁盘上没有 config.conf.template 也能生成（不依赖它）', async (t) => {
+test('createConf：磁盘上没有 config.conf.example 也能生成（不依赖它）', async (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'dc-ghost-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   cpSync(join(ROOT, 'src'), join(dir, 'src'), { recursive: true });
-  assert.equal(existsSync(join(dir, 'config.conf.template')), false, '前置条件：临时项目里没有模板文件');
+  assert.equal(existsSync(join(dir, 'config.conf.example')), false, '前置条件：临时项目里没有模板文件');
 
   const mod = await import(pathToFileURL(join(dir, 'src', 'settings.mjs')).href);
   const r = mod.createConf();
@@ -135,7 +136,7 @@ test('createConf：磁盘上没有 config.conf.template 也能生成（不依赖
   // macOS 的 tmpdir 是 /var → /private/var 的软链，比较前先取真实路径
   assert.equal(realpathSync(r.path), join(realpathSync(dir), 'config.conf'));
   assert.equal(norm(readFileSync(join(dir, 'config.conf'), 'utf8')), norm(CONFIG_TEMPLATE));
-  assert.equal(existsSync(join(dir, 'config.conf.template')), false, '生成过程不该凭空造出模板文件');
+  assert.equal(existsSync(join(dir, 'config.conf.example')), false, '生成过程不该凭空造出模板文件');
 });
 
 // ── loadSettings：读配置 + 纠错 ──

@@ -29,6 +29,7 @@ import { APP, EXIT } from '../src/app-profile.mjs';
 import { judge } from '../src/state.mjs';
 import { acquireLock } from '../src/lock.mjs';
 import { notify } from '../src/notify.mjs';
+import { pushResult } from '../src/webhook.mjs';
 import { isPortInUse, isDoubaoEndpoint, findDoubaoCdpPort, pickFreePort, portConflicts } from '../src/port.mjs';
 import {
   writeRun, appendHistory, readHistory, summarize, logPath, logDir, setLogDir,
@@ -73,6 +74,7 @@ const FLAG = {
   repair: argv.has('--repair'),
   yes: argv.has('--yes'),
   version: argv.has('--version'),
+  testWebhook: argv.has('--test-webhook'),
   log: !!logArg,
   logCount: logArg?.includes('=') ? Number(logArg.split('=')[1]) || 20 : 20,
 };
@@ -83,7 +85,7 @@ const FLAG = {
 const KNOWN = new Set([
   '--allow-relaunch', '--ignore-history', '--dry-run', '--json', '--doctor',
   '--quiet', '--no-notify', '--verbose', '--log', '--help', '-h', '--create-config',
-  '--repair', '--yes', '--version',
+  '--repair', '--yes', '--version', '--test-webhook',
 ]);
 const unknown = rawArgs.filter((a) => a.startsWith('--') && !KNOWN.has(a.split('=')[0]));
 const wantsHelp = argv.has('--help') || argv.has('-h');
@@ -1152,7 +1154,7 @@ async function main() {
   }
 
   // 首次运行：没有 config.conf 就用**代码内置的模板**生成一份（不读磁盘上的
-  // config.conf.template —— 那个文件可能已经被改名成 config.conf 或被删掉）。
+  // config.conf.example —— 那个文件可能已经被改名成 config.conf 或被删掉）。
   // 之前的做法是"没有就用内置默认值、什么都不生成"，结果是用户改不了任何东西
   // （连改哪个文件都不知道）。生成失败也不影响签到，绝不能因此中断。
   if (!existsSync(CONFIG_PATH)) {
@@ -1176,6 +1178,11 @@ async function main() {
         : '另一个实例正在启动，本次跳过';
       if (FLAG.json) console.log(JSON.stringify({ ok: true, result: 'SKIPPED', report: msg, needs_attention: false }));
       else if (!FLAG.quiet) console.log(msg);
+      // --test-webhook 要求「任意结果都推」，早返回也得走一次判定
+      await pushResult({
+        report: { result: 'SKIPPED', report: msg, needs_attention: false },
+        quiet: FLAG.quiet, testWebhook: FLAG.testWebhook,
+      });
       process.exit(EXIT.OK);
     }
   }
@@ -1206,6 +1213,11 @@ async function main() {
       });
       if (FLAG.json) console.log(JSON.stringify({ ok: true, result: 'SKIPPED', report: msg, needs_attention: false }));
       else if (!FLAG.quiet) console.log(msg);
+      // 同上：缓存跳过也是一次「结果」，--test-webhook 时要推
+      await pushResult({
+        report: { result: 'SKIPPED', report: msg, needs_attention: false },
+        quiet: FLAG.quiet, testWebhook: FLAG.testWebhook,
+      });
       process.exit(EXIT.OK);
     }
   }
@@ -1655,6 +1667,17 @@ async function finish(report, target, created) {
     }
   }
 
+  // ── 飞书 webhook ──
+  // 必须 await：下面就是 process.exit，它不会等未完成的 Promise，消息会发不出去。
+  const wh = await pushResult({
+    report, quiet: FLAG.quiet, testWebhook: FLAG.testWebhook,
+    breakerEnabled: PREFS ? PREFS.breaker.threshold > 0 : undefined,
+  });
+  // 只有真失败才出声；「按规则不推送」「没配地址」都是正常情况，不该刷屏
+  if (wh.reason && wh.reason !== '按规则不推送' && wh.reason !== '未配置 webhook，跳过') {
+    console.error(`[webhook] ${wh.reason}`);
+  }
+
   // BUSY / SKIPPED / CIRCUIT 都是「这次没做、但没出错」，退出码必须是 0 ——
   // 否则 launchd 每次都会记一条 exit code 1，日志里分不清"跳过了"和"挂了"。
   const code = {
@@ -1696,10 +1719,16 @@ export async function run() {
   });
   writeRun(timeline, { duration_ms: Date.now() - startedAt });
 
-    if (!FLAG.noNotify && !FLAG.dryRun) {
-      notify(APP_TITLE, e.message, { key: `ERR:${code}`, debounceMs: notifyDebounceMs() });
-    }
-    process.exit(code);
+  // 抛错路径也走同一套判定：--test-webhook 强推；常规下只在「无熔断 + 当天首个失败」时推。
+  // PREFS 可能还没加载，pushResult 会自己从 config.conf 兜底读熔断开关。
+  await pushResult({
+    report: payload, quiet: FLAG.quiet, testWebhook: FLAG.testWebhook,
+  });
+
+  if (!FLAG.noNotify && !FLAG.dryRun) {
+    notify(APP_TITLE, e.message, { key: `ERR:${code}`, debounceMs: notifyDebounceMs() });
+  }
+  process.exit(code);
   });
 }
 

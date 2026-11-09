@@ -5,6 +5,7 @@ config.conf
 logs/
 .lock/
 .notify-state.json
+.webhook-state.json
 
 # repair 的缓存备份（每次 5~7MB，可随时删）
 backup/
